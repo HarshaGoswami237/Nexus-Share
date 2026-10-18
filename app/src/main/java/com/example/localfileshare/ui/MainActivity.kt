@@ -1,37 +1,27 @@
-package com.example.localfileshare.ui
+package com.example.localfileshare
 
+import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
-import android.net.wifi.WifiManager
 import android.os.Bundle
-import android.text.format.Formatter
-import android.util.Log
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.example.localfileshare.R
+import androidx.core.content.ContextCompat
 import com.example.localfileshare.data.FileHelper
-import com.example.localfileshare.data.SharedFile
-import com.example.localfileshare.network.ServerManager
+import com.example.localfileshare.data.SharedRepository
 import com.example.localfileshare.network.NetworkUtils
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.example.localfileshare.service.ServerService
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var statusText: TextView
-    private lateinit var selectFileBtn: Button
-    private lateinit var toggleServerBtn: Button
-    private lateinit var fileRecyclerView: RecyclerView
-    private lateinit var fileAdapter: FileAdapter
-
-    private val sharedFilesList = mutableListOf<SharedFile>()
-    private var serverManager: ServerManager? = null
-    private var isServerRunning = false
+    private lateinit var tvServerEndpoint: TextView
+    private lateinit var tvMediaHubStatus: TextView
+    private lateinit var viewStatusDot: View
+    private lateinit var btnToggleServer: Button
+    private lateinit var cardSlotMediaHub: View
 
     private val pickMultipleFilesLauncher = registerForActivityResult(
         ActivityResultContracts.GetMultipleContents()
@@ -39,9 +29,8 @@ class MainActivity : AppCompatActivity() {
         if (uris.isNotEmpty()) {
             for (uri in uris) {
                 val newFile = FileHelper.createSharedFile(this, uri)
-                sharedFilesList.add(newFile)
+                SharedRepository.hostedFiles.add(newFile)
             }
-            fileAdapter.notifyDataSetChanged()
             updateStatus()
         }
     }
@@ -50,87 +39,55 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        statusText = findViewById(R.id.statusText)
-        selectFileBtn = findViewById(R.id.selectFileButton)
-        toggleServerBtn = findViewById(R.id.toggleServerButton)
-        fileRecyclerView = findViewById(R.id.fileRecyclerView)
+        tvServerEndpoint = findViewById(R.id.tvServerEndpoint)
+        tvMediaHubStatus = findViewById(R.id.tvMediaHubStatus)
+        viewStatusDot = findViewById(R.id.viewStatusDot)
+        btnToggleServer = findViewById(R.id.btnToggleServer)
+        cardSlotMediaHub = findViewById(R.id.cardSlotMediaHub)
 
-        fileAdapter = FileAdapter(sharedFilesList) { fileToRemove ->
-            val index = sharedFilesList.indexOf(fileToRemove)
-            if (index != -1) {
-                sharedFilesList.removeAt(index)
-                fileAdapter.notifyItemRemoved(index)
-                updateStatus()
-            }
-        }
-
-        fileRecyclerView.layoutManager = LinearLayoutManager(this)
-        fileRecyclerView.adapter = fileAdapter
-
-        selectFileBtn.setOnClickListener {
+        cardSlotMediaHub.setOnClickListener {
             pickMultipleFilesLauncher.launch("*/*")
         }
 
-        toggleServerBtn.setOnClickListener {
-            if (isServerRunning) {
-                stopLocalServer()
+        btnToggleServer.setOnClickListener {
+            btnToggleServer.isEnabled = false
+            if (ServerService.isRunning) {
+                val stopIntent = Intent(this, ServerService::class.java).apply {
+                    action = ServerService.ACTION_STOP
+                }
+                startService(stopIntent)
             } else {
-                startLocalServer()
-            }
-        }
-
-        updateStatus()
-    }
-
-    private fun startLocalServer() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                serverManager = ServerManager(applicationContext, sharedFilesList)
-                serverManager?.startServer()
-
-                withContext(Dispatchers.Main) {
-                    isServerRunning = true
-                    toggleServerBtn.text = "STOP HOSTING"
-                    updateStatus()
+                val startIntent = Intent(this, ServerService::class.java).apply {
+                    action = ServerService.ACTION_START
                 }
-            } catch (e: Throwable) {
-                Log.e("SERVER_ERROR", "Failed to start Ktor server", e)
-                withContext(Dispatchers.Main) {
-                    statusText.text = "Server Error: ${e.localizedMessage}"
-                }
+                ContextCompat.startForegroundService(this, startIntent)
             }
+            btnToggleServer.postDelayed({
+                btnToggleServer.isEnabled = true
+                updateStatus()
+            }, 600)
         }
     }
 
-    private fun stopLocalServer() {
-        serverManager?.stopServer()
-        serverManager = null
-        isServerRunning = false
-        toggleServerBtn.text = "START HOSTING"
+    override fun onResume() {
+        super.onResume()
         updateStatus()
     }
 
     private fun updateStatus() {
-        val count = sharedFilesList.size
-        if (isServerRunning) {
+        tvMediaHubStatus.text = "${SharedRepository.hostedFiles.size} files hosted"
+
+        if (ServerService.isRunning) {
             val ipAddress = NetworkUtils.getLocalIpAddress()
-            statusText.text = "$count Files Queued | Server: http://$ipAddress:8080"
+            tvServerEndpoint.text = "http://$ipAddress:8080"
+            viewStatusDot.setBackgroundColor(Color.parseColor("#10B981"))
+            btnToggleServer.text = "STOP SERVER"
+            btnToggleServer.setBackgroundColor(Color.parseColor("#DC2626"))
         } else {
-            statusText.text = "$count Files Queued | Server Offline"
+            tvServerEndpoint.text = "Server Offline"
+            viewStatusDot.setBackgroundColor(Color.parseColor("#64748B"))
+            btnToggleServer.text = "START SERVER"
+            btnToggleServer.setBackgroundColor(Color.parseColor("#2563EB"))
         }
-    }
-
-    private fun getLocalIpAddress(): String {
-        return try {
-            val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-            Formatter.formatIpAddress(wifiManager.connectionInfo.ipAddress)
-        } catch (e: Exception) {
-            "0.0.0.0"
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        stopLocalServer()
     }
 }
