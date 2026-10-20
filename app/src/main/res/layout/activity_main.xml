@@ -4,15 +4,19 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#0F172A"
-    android:fillViewport="true"
-    android:padding="20dp">
+    android:fillViewport="true">
 
+    <!-- Inner container holds the top padding so it forces everything down -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:paddingLeft="20dp"
+        android:paddingRight="20dp"
+        android:paddingTop="48dp"
+        android:paddingBottom="24dp">
 
-        <!-- Top Header Area -->
+        <!-- Header -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -49,7 +53,7 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Main Master Server Control Card -->
+        <!-- Main Server Master Card -->
         <androidx.cardview.widget.CardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -112,7 +116,7 @@
             </LinearLayout>
         </androidx.cardview.widget.CardView>
 
-        <!-- Active Modules Header -->
+        <!-- Active Modules Section -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -122,12 +126,12 @@
             android:textSize="12sp"
             android:textStyle="bold" />
 
-        <!-- Slot 01: Media & File Hub Card -->
+        <!-- Slot 01: Media Hub Card -->
         <androidx.cardview.widget.CardView
             android:id="@+id/cardSlotMediaHub"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
+            android:layout_marginBottom="20dp"
             android:clickable="true"
             android:focusable="true"
             app:cardBackgroundColor="#1E293B"
@@ -183,11 +187,10 @@
             </LinearLayout>
         </androidx.cardview.widget.CardView>
 
-        <!-- Upcoming Modules Header -->
+        <!-- Upcoming Modules Section -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
             android:layout_marginBottom="10dp"
             android:text="UPCOMING MODULES"
             android:textColor="#64748B"

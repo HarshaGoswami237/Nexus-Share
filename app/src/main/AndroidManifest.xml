@@ -32,13 +32,13 @@
         android:theme="@style/Theme.LocalFileShare">
 
         <service
-            android:name=".service.ServerService"
+            android:name=".network.ServerService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -47,7 +47,7 @@
         </activity>
 
         <activity
-            android:name=".MediaHubActivity"
+            android:name=".ui.MediaHubActivity"
             android:exported="false" />
     </application>
 

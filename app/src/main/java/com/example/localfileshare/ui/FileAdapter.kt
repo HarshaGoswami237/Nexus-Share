@@ -3,7 +3,7 @@ package com.example.localfileshare.ui
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageButton
+import android.widget.Button
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.localfileshare.R
@@ -17,7 +17,7 @@ class FileAdapter(
     class FileViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val fileNameText: TextView = itemView.findViewById(R.id.fileNameText)
         val fileSizeText: TextView = itemView.findViewById(R.id.fileSizeText)
-        val removeBtn: ImageButton = itemView.findViewById(R.id.removeFileBtn)
+        val removeBtn: Button = itemView.findViewById(R.id.removeFileBtn)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FileViewHolder {
