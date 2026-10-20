@@ -21,23 +21,19 @@ class MediaHubActivity : AppCompatActivity() {
     private lateinit var rvFiles: RecyclerView
     private lateinit var fileAdapter: FileAdapter
 
-    // OpenMultipleDocuments satisfies Android's DownloadStorageProvider requirement
     private val selectFilesLauncher = registerForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
-            for (uri: Uri in uris) {
+            for (uri in uris) {
                 try {
-                    // Grants permanent read access across threads and process restarts
                     contentResolver.takePersistableUriPermission(
                         uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION
                     )
-                } catch (_: Exception) {
-                    // Non-SAF providers that don't need persistable flags
-                }
+                } catch (_: Exception) {}
 
-                val newFile: SharedFile = FileHelper.createSharedFile(this, uri)
+                val newFile = FileHelper.createSharedFile(this, uri)
                 SharedRepository.hostedFiles.add(newFile)
             }
             fileAdapter.notifyDataSetChanged()
@@ -52,8 +48,8 @@ class MediaHubActivity : AppCompatActivity() {
         tvStatusSummary = findViewById(R.id.tvQueueStatusSummary)
         rvFiles = findViewById(R.id.rvQueueFiles)
 
-        fileAdapter = FileAdapter(SharedRepository.hostedFiles) { fileToRemove: SharedFile ->
-            val index: Int = SharedRepository.hostedFiles.indexOf(fileToRemove)
+        fileAdapter = FileAdapter(SharedRepository.hostedFiles) { fileToRemove ->
+            val index = SharedRepository.hostedFiles.indexOf(fileToRemove)
             if (index != -1) {
                 SharedRepository.hostedFiles.removeAt(index)
                 fileAdapter.notifyItemRemoved(index)
@@ -64,13 +60,12 @@ class MediaHubActivity : AppCompatActivity() {
         rvFiles.layoutManager = LinearLayoutManager(this)
         rvFiles.adapter = fileAdapter
 
-        // OpenMultipleDocuments expects an Array<String> of MIME types
         findViewById<Button>(R.id.btnAddFiles).setOnClickListener {
             selectFilesLauncher.launch(arrayOf("*/*"))
         }
 
         findViewById<Button>(R.id.btnClearAllFiles).setOnClickListener {
-            val total: Int = SharedRepository.hostedFiles.size
+            val total = SharedRepository.hostedFiles.size
             if (total > 0) {
                 SharedRepository.hostedFiles.clear()
                 fileAdapter.notifyItemRangeRemoved(0, total)
@@ -88,8 +83,8 @@ class MediaHubActivity : AppCompatActivity() {
     }
 
     private fun updateHeaderStatus() {
-        val count: Int = SharedRepository.hostedFiles.size
-        val serverStatus: String = if (ServerService.isRunning) "Server Active" else "Server Offline"
+        val count = SharedRepository.hostedFiles.size
+        val serverStatus = if (ServerService.isRunning) "Server Active" else "Server Offline"
         tvStatusSummary.text = "$count Files Queued • $serverStatus"
 
         if (ServerService.isRunning) {

@@ -131,57 +131,108 @@ class ServerManager(
         file: SharedFile,
         asAttachment: Boolean
     ) = withContext(Dispatchers.IO) {
+        val totalBytes = file.sizeBytes
+        val mimeType = resolveMimeType(file.name, file.mimeType)
+        val parsedContentType = try {
+            ContentType.parse(mimeType)
+        } catch (_: Exception) {
+            ContentType.Application.OctetStream
+        }
+
+        val rangeHeader = call.request.headers[HttpHeaders.Range]
+        val disposition = if (asAttachment) "attachment" else "inline"
+
+        call.response.header(HttpHeaders.ContentDisposition, "$disposition; filename=\"${file.name}\"")
+        call.response.header(HttpHeaders.AcceptRanges, "bytes")
+
+        // Try getting native ParcelFileDescriptor first; if security denies it, fallback to InputStream
         var pfd: ParcelFileDescriptor? = null
         try {
-            pfd = try {
-                this@ServerManager.context.contentResolver.openFileDescriptor(file.uri, "r")
-            } catch (_: SecurityException) {
-                openFallbackDescriptor(file.uri, file.name)
-            }
+            pfd = this@ServerManager.context.contentResolver.openFileDescriptor(file.uri, "r")
+        } catch (_: Throwable) {
+            // Permission denial caught safely — will use InputStream fallback below
+            pfd = null
+        }
 
-            if (pfd == null) {
-                call.respond(HttpStatusCode.InternalServerError, "Failed to read file descriptor")
-                return@withContext
-            }
+        try {
+            if (pfd != null) {
+                // High-speed descriptor pipeline
+                if (!asAttachment && rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                    val ranges = rangeHeader.removePrefix("bytes=").split("-")
+                    val start = ranges[0].toLongOrNull() ?: 0L
+                    val end = if (ranges.size > 1 && ranges[1].isNotEmpty()) {
+                        ranges[1].toLongOrNull() ?: (totalBytes - 1)
+                    } else {
+                        totalBytes - 1
+                    }.coerceAtMost(totalBytes - 1)
 
-            val totalBytes = file.sizeBytes
-            val mimeType = resolveMimeType(file.name, file.mimeType)
-            val parsedContentType = try {
-                ContentType.parse(mimeType)
-            } catch (_: Exception) {
-                ContentType.Application.OctetStream
-            }
+                    val contentLength = (end - start) + 1
+                    call.response.status(HttpStatusCode.PartialContent)
+                    call.response.header(HttpHeaders.ContentRange, "bytes $start-$end/$totalBytes")
+                    call.response.header(HttpHeaders.ContentLength, contentLength.toString())
 
-            val rangeHeader = call.request.headers[HttpHeaders.Range]
-            val disposition = if (asAttachment) "attachment" else "inline"
-
-            call.response.header(HttpHeaders.ContentDisposition, "$disposition; filename=\"${file.name}\"")
-            call.response.header(HttpHeaders.AcceptRanges, "bytes")
-
-            // Byte-Range handling for media playback
-            if (!asAttachment && rangeHeader != null && rangeHeader.startsWith("bytes=")) {
-                val ranges = rangeHeader.removePrefix("bytes=").split("-")
-                val start = ranges[0].toLongOrNull() ?: 0L
-                val end = if (ranges.size > 1 && ranges[1].isNotEmpty()) {
-                    ranges[1].toLongOrNull() ?: (totalBytes - 1)
+                    call.respondOutputStream(contentType = parsedContentType, status = HttpStatusCode.PartialContent) {
+                        pipeRange(pfd, start, contentLength, this)
+                    }
                 } else {
-                    totalBytes - 1
-                }.coerceAtMost(totalBytes - 1)
+                    call.response.status(HttpStatusCode.OK)
+                    call.response.header(HttpHeaders.ContentLength, totalBytes.toString())
 
-                val contentLength = (end - start) + 1
-                call.response.status(HttpStatusCode.PartialContent)
-                call.response.header(HttpHeaders.ContentRange, "bytes $start-$end/$totalBytes")
-                call.response.header(HttpHeaders.ContentLength, contentLength.toString())
-
-                call.respondOutputStream(contentType = parsedContentType, status = HttpStatusCode.PartialContent) {
-                    pipeRange(pfd, start, contentLength, this)
+                    call.respondOutputStream(contentType = parsedContentType, status = HttpStatusCode.OK) {
+                        pipeFull(pfd, this)
+                    }
                 }
             } else {
-                call.response.status(HttpStatusCode.OK)
-                call.response.header(HttpHeaders.ContentLength, totalBytes.toString())
+                // 100% Reliable Fallback: Pure InputStream (Bypasses DownloadStorageProvider restrictions)
+                val inputStream = this@ServerManager.context.contentResolver.openInputStream(file.uri)
+                if (inputStream == null) {
+                    call.respond(HttpStatusCode.InternalServerError, "File stream unreadable")
+                    return@withContext
+                }
 
-                call.respondOutputStream(contentType = parsedContentType, status = HttpStatusCode.OK) {
-                    pipeFull(pfd, this)
+                if (!asAttachment && rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                    val ranges = rangeHeader.removePrefix("bytes=").split("-")
+                    val start = ranges[0].toLongOrNull() ?: 0L
+                    val end = if (ranges.size > 1 && ranges[1].isNotEmpty()) {
+                        ranges[1].toLongOrNull() ?: (totalBytes - 1)
+                    } else {
+                        totalBytes - 1
+                    }.coerceAtMost(totalBytes - 1)
+
+                    val contentLength = (end - start) + 1
+                    call.response.status(HttpStatusCode.PartialContent)
+                    call.response.header(HttpHeaders.ContentRange, "bytes $start-$end/$totalBytes")
+                    call.response.header(HttpHeaders.ContentLength, contentLength.toString())
+
+                    call.respondOutputStream(contentType = parsedContentType, status = HttpStatusCode.PartialContent) {
+                        inputStream.use { stream ->
+                            stream.skip(start)
+                            val buffer = ByteArray(64 * 1024)
+                            var remaining = contentLength
+                            while (remaining > 0) {
+                                val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+                                val bytesRead = stream.read(buffer, 0, toRead)
+                                if (bytesRead == -1) break
+                                write(buffer, 0, bytesRead)
+                                remaining -= bytesRead
+                            }
+                            flush()
+                        }
+                    }
+                } else {
+                    call.response.status(HttpStatusCode.OK)
+                    call.response.header(HttpHeaders.ContentLength, totalBytes.toString())
+
+                    call.respondOutputStream(contentType = parsedContentType, status = HttpStatusCode.OK) {
+                        inputStream.use { stream ->
+                            val buffer = ByteArray(64 * 1024)
+                            var bytesRead: Int
+                            while (stream.read(buffer).also { bytesRead = it } != -1) {
+                                write(buffer, 0, bytesRead)
+                            }
+                            flush()
+                        }
+                    }
                 }
             }
         } catch (_: io.ktor.utils.io.ClosedWriteChannelException) {
