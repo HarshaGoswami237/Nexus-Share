@@ -133,7 +133,12 @@ class ServerManager(
     ) = withContext(Dispatchers.IO) {
         var pfd: ParcelFileDescriptor? = null
         try {
-            pfd = this@ServerManager.context.contentResolver.openFileDescriptor(file.uri, "r")
+            pfd = try {
+                this@ServerManager.context.contentResolver.openFileDescriptor(file.uri, "r")
+            } catch (_: SecurityException) {
+                openFallbackDescriptor(file.uri, file.name)
+            }
+
             if (pfd == null) {
                 call.respond(HttpStatusCode.InternalServerError, "Failed to read file descriptor")
                 return@withContext
@@ -153,6 +158,7 @@ class ServerManager(
             call.response.header(HttpHeaders.ContentDisposition, "$disposition; filename=\"${file.name}\"")
             call.response.header(HttpHeaders.AcceptRanges, "bytes")
 
+            // Byte-Range handling for media playback
             if (!asAttachment && rangeHeader != null && rangeHeader.startsWith("bytes=")) {
                 val ranges = rangeHeader.removePrefix("bytes=").split("-")
                 val start = ranges[0].toLongOrNull() ?: 0L
@@ -188,6 +194,20 @@ class ServerManager(
             try {
                 pfd?.close()
             } catch (_: Exception) {}
+        }
+    }
+
+    private fun openFallbackDescriptor(uri: android.net.Uri, fileName: String): ParcelFileDescriptor? {
+        return try {
+            val inputStream = this@ServerManager.context.contentResolver.openInputStream(uri) ?: return null
+            val tempFile = java.io.File(this@ServerManager.context.cacheDir, "stream_${System.currentTimeMillis()}_$fileName")
+            tempFile.outputStream().use { out ->
+                inputStream.copyTo(out)
+            }
+            tempFile.deleteOnExit()
+            ParcelFileDescriptor.open(tempFile, ParcelFileDescriptor.MODE_READ_ONLY)
+        } catch (_: Exception) {
+            null
         }
     }
 

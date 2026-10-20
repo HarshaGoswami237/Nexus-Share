@@ -21,11 +21,22 @@ class MediaHubActivity : AppCompatActivity() {
     private lateinit var rvFiles: RecyclerView
     private lateinit var fileAdapter: FileAdapter
 
+    // OpenMultipleDocuments satisfies Android's DownloadStorageProvider requirement
     private val selectFilesLauncher = registerForActivityResult(
-        ActivityResultContracts.GetMultipleContents()
+        ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
             for (uri: Uri in uris) {
+                try {
+                    // Grants permanent read access across threads and process restarts
+                    contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: Exception) {
+                    // Non-SAF providers that don't need persistable flags
+                }
+
                 val newFile: SharedFile = FileHelper.createSharedFile(this, uri)
                 SharedRepository.hostedFiles.add(newFile)
             }
@@ -41,7 +52,6 @@ class MediaHubActivity : AppCompatActivity() {
         tvStatusSummary = findViewById(R.id.tvQueueStatusSummary)
         rvFiles = findViewById(R.id.rvQueueFiles)
 
-        // Fully typed lambda for item removal
         fileAdapter = FileAdapter(SharedRepository.hostedFiles) { fileToRemove: SharedFile ->
             val index: Int = SharedRepository.hostedFiles.indexOf(fileToRemove)
             if (index != -1) {
@@ -54,8 +64,9 @@ class MediaHubActivity : AppCompatActivity() {
         rvFiles.layoutManager = LinearLayoutManager(this)
         rvFiles.adapter = fileAdapter
 
+        // OpenMultipleDocuments expects an Array<String> of MIME types
         findViewById<Button>(R.id.btnAddFiles).setOnClickListener {
-            selectFilesLauncher.launch("*/*")
+            selectFilesLauncher.launch(arrayOf("*/*"))
         }
 
         findViewById<Button>(R.id.btnClearAllFiles).setOnClickListener {
@@ -81,7 +92,6 @@ class MediaHubActivity : AppCompatActivity() {
         val serverStatus: String = if (ServerService.isRunning) "Server Active" else "Server Offline"
         tvStatusSummary.text = "$count Files Queued • $serverStatus"
 
-        // Send refresh intent to update live foreground notification
         if (ServerService.isRunning) {
             val refreshIntent = Intent(this, ServerService::class.java).apply {
                 action = ServerService.ACTION_UPDATE_FILES
